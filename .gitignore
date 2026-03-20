@@ -1,0 +1,3 @@
+load_to_snowflake.py
+jobs_raw.json
+*.env
