@@ -1,12 +1,14 @@
-# LinkedIn Job Market Analysis — Data Engineering Pipeline
+# LinkedIn Job Market Analysis — End-to-End Data Engineering Pipeline
 
 ![SQL](https://img.shields.io/badge/SQL-Snowflake-blue)
-![Python](https://img.shields.io/badge/Python-3.13-green)
+![Python](https://img.shields.io/badge/Python-3.11-green)
+![dbt](https://img.shields.io/badge/dbt-1.11.7-orange)
+![Snowflake](https://img.shields.io/badge/Snowflake-Cloud-lightblue)
 ![Status](https://img.shields.io/badge/Status-Complete-brightgreen)
 
 ## Project Overview
 
-An end-to-end data engineering and analytics project that extracts, loads, and analyzes **123,849 real LinkedIn job postings** to uncover actionable insights about the data job market.
+An end-to-end data engineering and analytics project that extracts, loads, transforms, and analyzes **123,849 real LinkedIn job postings** to uncover actionable insights about the data job market.
 
 Built to answer one real question: *Where should someone with 1-2 years of experience focus their energy to break into data roles?*
 
@@ -19,6 +21,7 @@ Built to answer one real question: *Where should someone with 1-2 years of exper
 | Data Source | Kaggle — LinkedIn Job Postings Dataset (April 2024) |
 | Data Loading | Python (pandas, snowflake-connector-python) |
 | Data Warehouse | Snowflake (AWS US-East-1) |
+| Transformation | dbt (data build tool) |
 | Analysis | SQL (Snowflake) |
 | Version Control | Git & GitHub |
 
@@ -30,21 +33,82 @@ Built to answer one real question: *Where should someone with 1-2 years of exper
 Kaggle Dataset (123,849 rows CSV)
         ↓
 Python Script
-(pandas — clean, handle NaN, chunk-based loading)
+(pandas — clean, handle NaN, chunk-based loading 2000 rows/batch)
         ↓
 Snowflake Cloud Data Warehouse
 (LINKEDIN_JOBS → JOB_DATA → RAW_JOBS)
         ↓
-SQL Analysis (5 business questions)
+dbt Transformation Layer
+(Staging → Intermediate → Mart)
+        ↓
+5 Production-Ready Mart Tables
         ↓
 Actionable Job Market Insights
 ```
 
 ---
 
-## Dataset Profile — Data Quality Assessment
+## dbt Project Structure
 
-Before writing a single business query, a full data profiling exercise was conducted to understand coverage and usability of each column.
+```
+linkedin_job_analysis/
+├── models/
+│   ├── staging/
+│   │   ├── sources.yml              # Snowflake source definition
+│   │   └── stg_jobs.sql             # Cleans raw data — INITCAP, TRIM, REGEXP_REPLACE
+│   ├── intermediate/
+│   │   └── int_data_roles.sql       # Filters data roles, removes staffing agencies
+│   └── mart/
+│       ├── schema.yml               # dbt tests — not_null, unique
+│       ├── mart_title_demand.sql    # Q1 — Job title demand by experience level
+│       ├── mart_company_paths.sql   # Q2 — Companies with structured career paths
+│       ├── mart_concentration.sql   # Q3 — Job concentration ratio per role
+│       ├── mart_job_views.sql       # Q4 — Highest viewed roles
+│       └── mart_hiring_by_day.sql   # Q5 — Hiring activity by day of week
+├── dbt_project.yml
+└── README.md
+```
+
+---
+
+## dbt Lineage Graph
+
+![dbt Lineage Graph](images/lineage_graph.png)
+
+> Full pipeline: `RAW_JOBS → stg_jobs → int_data_roles → 5 mart models`
+
+---
+
+## Layered Architecture — Why It Matters
+
+| Layer | Model | Materialization | Purpose |
+|---|---|---|---|
+| Staging | `stg_jobs` | View | Connects to raw Snowflake table, cleans and standardizes |
+| Intermediate | `int_data_roles` | View | Filters data roles only, removes staffing agency noise |
+| Mart | 5 models | Table | Answers each business question — production-ready |
+
+**Key principle:** Fix once in staging or intermediate — all downstream models automatically inherit the fix. No duplicated logic across models.
+
+---
+
+## Data Quality — dbt Tests
+
+All mart models have automated data quality tests defined in `schema.yml`.
+
+| Test | Model | Column | Result |
+|---|---|---|---|
+| not_null | mart_title_demand | JOB_TITLE | ✅ PASS |
+| not_null | mart_company_paths | COMPANY_NAME | ✅ PASS |
+| not_null | mart_concentration | JOB_TITLE | ✅ PASS |
+| not_null | mart_job_views | COMPANY_NAME | ✅ PASS |
+| not_null | mart_hiring_by_day | DAY_OF_WEEK | ✅ PASS |
+| unique | mart_hiring_by_day | DAY_OF_WEEK | ✅ PASS |
+
+**6/6 tests passing.**
+
+---
+
+## Dataset Profile — Data Quality Assessment
 
 | Column | Coverage | Usability | Decision |
 |---|---|---|---|
@@ -66,11 +130,9 @@ Before writing a single business query, a full data profiling exercise was condu
 
 ## Business Questions & Findings
 
-### Question 1 — Which job titles have highest posting volume at each experience level?
+### Q1 — Which job titles have highest posting volume at each experience level?
 
-**Business Goal:** Identify where entry-level demand is strongest to optimize job search targeting.
-
-**SQL Approach:** Case-insensitive pattern matching (ILIKE) to filter data roles, grouped by title and experience level, ordered by posting volume. NULL experience levels excluded (23.7% of data).
+**SQL approach:** `ILIKE` pattern matching to filter data roles, `GROUP BY` title and experience level, `ORDER BY` posting volume. NULL experience levels excluded (23.7% of data).
 
 **Key Findings:**
 
@@ -80,20 +142,15 @@ Before writing a single business query, a full data profiling exercise was condu
 | Data Engineer | 26 | 36 | ↗ Skews senior |
 | Data Scientist | 17 | 19 | ↗ Skews senior |
 
-**Insight:**
-Data Analyst is the most balanced and accessible entry point into data careers — near-equal demand at both levels means less competition pressure at entry. Data Engineer offers stronger long-term demand but requires more experience to break in.
-
-**Data Limitation:** 23.7% of postings had NULL experience level and were excluded.
+**Insight:** Data Analyst is the most accessible entry point — near-equal demand at both levels means less competition pressure at entry.
 
 ---
 
-### Question 2 — Which companies hire across multiple experience levels showing structured career paths?
+### Q2 — Which companies hire across multiple experience levels?
 
-**Business Goal:** Identify companies worth targeting for long-term career growth, not just immediate hiring.
+**SQL approach:** `COUNT(DISTINCT EXPERIENCE_LEVEL)` per company, `HAVING > 1` to filter single-level companies, blacklist to remove staffing agencies.
 
-**SQL Approach:** COUNT DISTINCT experience levels per company, filtered with HAVING > 1 level. Description filtering applied to reduce staffing agency noise.
-
-**Key Findings — Direct Employers:**
+**Key Findings:**
 
 | Company | Experience Levels | Data Jobs |
 |---|---|---|
@@ -102,22 +159,14 @@ Data Analyst is the most balanced and accessible entry point into data careers �
 | American Express | 4 | 15 |
 | Oracle | 4 | 33 |
 | NBCUniversal | 4 | 18 |
-| GE Aerospace | 4 | 17 |
-| Merck | 4 | 15 |
-| Cloudflare | 4 | 12 |
 
-**Strategic Insight:**
-Capital One stands out — 234 data jobs across 5 experience levels indicates a mature, scaled data organization with a clear career ladder from entry to director level.
-
-**Data Limitation:** Staffing agencies use direct-employer language in descriptions and could not be fully filtered. Manual verification recommended before targeting companies.
+**Insight:** Capital One stands out — 234 data jobs across 5 levels indicates a mature data organization with a clear career ladder from entry to director.
 
 ---
 
-### Question 3 — Which roles have openings concentrated in few companies vs spread across many?
+### Q3 — How concentrated are job openings per role?
 
-**Business Goal:** Understand market structure to inform whether to apply broadly or target specific employers.
-
-**SQL Approach:** Concentration ratio = total openings / distinct companies hiring per role.
+**SQL approach:** Custom concentration ratio = `COUNT(*) / COUNT(DISTINCT COMPANY_NAME)` per role. Cast to `::NUMERIC` to avoid integer division.
 
 **Key Findings:**
 
@@ -126,19 +175,16 @@ Capital One stands out — 234 data jobs across 5 experience levels indicates a 
 | Business Analyst | 829 | 969 | 1.17 | 🟢 Spread |
 | Data Analyst | 396 | 463 | 1.17 | 🟢 Spread |
 | Data Engineer | 418 | 447 | 1.07 | 🟢 Spread |
-| Data Scientist | 29 | 33 | 1.14 | 🟢 Spread |
-| Online Data Analyst | 2 | 20 | 10.0 | 🔴 Concentrated |
 
-**Strategic Insight:**
-All core data roles show ratios close to 1.0 — demand is democratically spread across hundreds of companies. This favors cold applicants with no existing network — more companies means more doors. Concentrated roles suit targeted applications with referrals.
+**Insight:** All core data roles show ratios close to 1.0 — demand is democratically spread across hundreds of companies. Favors cold applicants with no existing network.
+
+**Known limitation:** Job titles contain location suffixes (`-Va`, `-Ca`) and remote tags which could not be fully standardized. Results should be interpreted at a broad level. Future improvement: standardize titles using a `CASE`-based role categorization model.
 
 ---
 
-### Question 4 — Which companies and roles attract highest job views?
+### Q4 — Which roles attract highest job views?
 
-**Business Goal:** Identify where genuine candidate interest is concentrated — high views signal both market demand and competition level.
-
-**SQL Approach:** AVG(VIEWS) per company-role combination — AVG chosen over SUM to normalize for posting volume. Minimum 3 postings per group for statistical reliability.
+**SQL approach:** `AVG(VIEWS)` per company-role combination. `AVG` chosen over `SUM` to normalize for posting volume. `HAVING COUNT(*) > 1` for statistical reliability.
 
 **Key Findings:**
 
@@ -148,56 +194,30 @@ All core data roles show ratios close to 1.0 — demand is democratically spread
 | ChabezTech LLC | Senior Data Engineer | 959 |
 | Paramount | Business Analyst | 942 |
 | Selby Jennings | Senior Data Analyst | 929 |
-| Integration International | Business Analyst | 810 |
-| OpenWeb | Data Engineer | 752 |
 
-**Strategic Insight:**
-ClarisHealth's Data Analyst role attracts the highest average views in the entire dataset — a healthcare company hiring for a data role. For candidates with RCM or healthcare domain experience, this represents a natural competitive advantage over generic applicants.
-
-**Data Limitation:** Staffing agencies still present. Views reflect posting attractiveness, not direct employer brand.
+**Insight:** ClarisHealth's Data Analyst role attracts the highest average views in the dataset — a healthcare company hiring for a data role. Candidates with RCM or healthcare domain experience have a natural competitive advantage here.
 
 ---
 
-### Question 5 — When do companies post data jobs most actively?
+### Q5 — When do companies post data jobs most actively?
 
-**Business Goal:** Identify optimal timing to apply — early applicants get more visibility before competition builds.
-
-**SQL Approach:** Extracted day of week from Unix timestamp using TO_TIMESTAMP(LISTED_TIME / 1000), mapped numeric days to names using CASE statement.
+**SQL approach:** `DAYNAME(LISTED_TIME)` to extract day name from timestamp. `COUNT(*) * 100.0 / SUM(COUNT(*)) OVER ()` window function to calculate percentage share per day in a single scan.
 
 **Key Findings:**
 
 | Day | Job Postings | Share |
 |---|---|---|
-| Thursday | 672 | 44% |
-| Friday | 478 | 31% |
-| Tuesday | 185 | 12% |
-| Monday | 111 | 7% |
-| Wednesday | 103 | 7% |
-| Saturday | 78 | 5% |
-| Sunday | 2 | 0% |
+| Thursday | 346 | 38.75% |
+| Friday | 282 | 31.58% |
+| Tuesday | 104 | 11.65% |
+| Wednesday | 65 | 7.28% |
+| Monday | 60 | 6.72% |
+| Saturday | 36 | 4.03% |
+| Sunday | 0 | 0% |
 
-**Strategic Insight:**
-73% of data job postings go live on Thursday and Friday. Hiring managers spend Monday-Wednesday in planning — then post roles Thursday before the weekend. Applying within 24 hours of posting maximizes visibility.
+**Insight:** 70% of data job postings go live Thursday and Friday. Apply within 24 hours of posting for maximum visibility. Check job boards every Thursday morning.
 
-**Practical Recommendation:** Check job boards every Thursday morning. Set alerts for target companies on Wednesday night.
-
-**Data Limitation:** Single month snapshot (April 2024). Pattern should be validated across multiple months.
-
----
-
-## SQL Skills Demonstrated
-
-- Data profiling with coverage percentage calculations
-- Case-insensitive pattern matching with ILIKE
-- Aggregations with GROUP BY, HAVING, ORDER BY
-- COUNT DISTINCT for multi-dimensional analysis
-- NULL handling — exclude, fill, or highlight strategies
-- Unix timestamp conversion with TO_TIMESTAMP
-- EXTRACT for date part analysis
-- CASE statements for readable label mapping
-- Concentration ratio calculation
-- AVG vs SUM decision making for fair metric comparison
-- Multi-condition WHERE clauses with AND/OR logic
+**Known limitation:** Single month snapshot (April 2024). Pattern should be validated across multiple months.
 
 ---
 
@@ -205,13 +225,38 @@ ClarisHealth's Data Analyst role attracts the highest average views in the entir
 
 | Challenge | Solution |
 |---|---|
-| API rate limit exhausted (25 requests/month) | Switched to Kaggle dataset — 123,849 rows |
-| MemoryError loading full CSV at once | Chunk-based loading — 2,000 rows per batch |
+| API rate limit exhausted | Switched to Kaggle dataset — 123,849 rows |
+| MemoryError loading full CSV | Chunk-based loading — 2,000 rows per batch |
 | NaN values breaking Snowflake inserts | `df.astype(object).where(df.notna(), None)` |
-| Snowflake connection — 6 failed attempts | Used `SELECT SYSTEM$ALLOWLIST()` to find exact host |
-| Credentials pushed to public GitHub | Removed files, added .gitignore, changed password |
-| Staffing agencies polluting results | Description filtering + documented as limitation |
-| Unix timestamps in LISTED_TIME | `TO_TIMESTAMP(LISTED_TIME / 1000)` conversion |
+| Snowflake connection failures | Used `SELECT SYSTEM$ALLOWLIST()` to find exact host |
+| Credentials pushed to public GitHub | Removed files, added `.gitignore`, changed password |
+| Staffing agencies polluting results | Description + company name blacklist filtering |
+| Unix timestamps in LISTED_TIME | `DAYNAME(LISTED_TIME)` after cleaning in staging |
+| Column rename breaking downstream models | Learned dbt layered architecture — fix staging, fix everything |
+| Snowflake case sensitivity errors | Always use uppercase column names in Snowflake |
+
+---
+
+## SQL & dbt Skills Demonstrated
+
+**SQL**
+- Data profiling with coverage percentage calculations
+- Case-insensitive pattern matching with `ILIKE`
+- Window functions — `SUM() OVER ()`, `ROW_NUMBER()`
+- `COUNT(DISTINCT)` for multi-dimensional analysis
+- Custom metric design — concentration ratio
+- Unix timestamp conversion with `TO_TIMESTAMP` and `DAYNAME`
+- `REGEXP_REPLACE` for pattern-based string cleaning
+- NULL handling strategies — exclude, fill, highlight
+- `CAST / ::NUMERIC` to avoid integer division errors
+
+**dbt**
+- 3-layer architecture — staging, intermediate, mart
+- `{{ source() }}` and `{{ ref() }}` for dependency management
+- Materialization strategy — views for staging/intermediate, tables for marts
+- `schema.yml` — automated `not_null` and `unique` tests
+- `dbt run`, `dbt test`, `dbt docs generate` workflow
+- `--full-refresh` for cache-busting rebuilds
 
 ---
 
@@ -220,20 +265,18 @@ ClarisHealth's Data Analyst role attracts the highest average views in the entir
 1. **Data Analyst is the most accessible entry point** — balanced demand across 396 companies
 2. **Capital One is the top data employer** — 234 jobs across 5 experience levels
 3. **All core data roles show democratic market structure** — hundreds of companies to target
-4. **Healthcare + data = competitive advantage** — domain expertise differentiates candidates
-5. **Apply on Thursday mornings** — 73% of postings go live Thursday-Friday
-6. **Salary transparency is deliberately low** — 24% coverage is a negotiation strategy not a data gap
+4. **Healthcare + data = competitive advantage** — ClarisHealth's role had 1,142 avg views
+5. **Apply on Thursday mornings** — 70% of postings go live Thursday-Friday
+6. **Salary transparency is deliberately low** — 24% coverage is a negotiation strategy, not a data gap
 
 ---
 
-## Project Structure
+## Future Improvements
 
-```
-LinkedIn_jobanalysis/
-├── .gitignore                  # Protects sensitive files
-├── Analysis_insights.md        # Detailed SQL analysis notebook
-└── README.md                   # This file
-```
+- Standardize job titles using `CASE`-based role categorization to fix concentration ratio granularity
+- Replace staffing agency blacklist with a dbt `seed` file for scalable filtering
+- Add incremental dbt models to support ongoing data loads
+- Build Power BI dashboard on top of mart tables for visual reporting
 
 ---
 
@@ -243,4 +286,3 @@ Built by **Saransh Sharma** as part of a self-directed transition into Analytics
 
 - LinkedIn: [linkedin.com/in/saranssharmaofficial](https://linkedin.com/in/saranssharmaofficial)
 - GitHub: [github.com/ssharma2315](https://github.com/ssharma2315)
-
