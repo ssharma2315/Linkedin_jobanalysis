@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: job_data
+    database: LINKEDIN_JOBS
+    schema: JOB_DATA
+    tables:
+      - name: raw_jobs

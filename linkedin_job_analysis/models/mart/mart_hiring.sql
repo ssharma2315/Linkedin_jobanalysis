@@ -1,0 +1,11 @@
+{{config(materialized = 'table')}}
+
+WITH JOBS AS (
+    SELECT DAYNAME(LISTED_TIME) AS DAY_OF_WEEK,
+    COUNT(*) AS JOB_COUNT,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS JOB_PERCENTAGE
+    FROM {{ref('int_data_roles')}}
+    GROUP BY DAY_OF_WEEK
+    ORDER BY JOB_COUNT DESC
+)
+SELECT * FROM JOBS

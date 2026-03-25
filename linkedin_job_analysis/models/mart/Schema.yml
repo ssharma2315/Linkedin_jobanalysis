@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: mart_title_demand
+    columns:
+      - name: JOB_TITLE
+        tests:
+          - not_null
+
+  - name: mart_company_path
+    columns:
+      - name: COMPANY_NAME
+        tests:
+          - not_null
+
+  - name: mart_concentration
+    columns:
+      - name: JOB_TITLE
+        tests:
+          - not_null
+
+  - name: mart_views
+    columns:
+      - name: COMPANY_NAME
+        tests:
+          - not_null
+
+  - name: mart_hiring
+    columns:
+      - name: DAY_OF_WEEK
+        tests:
+          - not_null
+          - unique
